@@ -1,0 +1,624 @@
+pipeline{
+    agent{
+        label "jenkins-agent"
+    }
+    tools {
+        jdk 'Java17'
+        maven 'Maven3'
+    }
+    environment {
+        APP_NAME = "complete-prodcution-e2e-pipeline"
+        RELEASE = "1.0.0"
+        DOCKER_USER = "dmancloud"
+        DOCKER_PASS = 'dockerhub'
+        IMAGE_NAME = "${DOCKER_USER}" + "/" + "${APP_NAME}"
+        IMAGE_TAG = "${RELEASE}-${BUILD_NUMBER}"
+        JENKINS_API_TOKEN = credentials("JENKINS_API_TOKEN")
+
+    }
+    stages{
+        stage("Cleanup Workspace"){
+            steps {
+                cleanWs()
+            }
+
+        }
+    
+        stage("Checkout from SCM"){
+            steps {
+                git branch: 'main', credentialsId: 'github', url: 'https://github.com/dmancloud/complete-prodcution-e2e-pipeline'
+            }
+
+        }
+
+        stage("Build Application"){
+            steps {
+                sh "mvn clean package"
+            }
+
+        }
+
+        stage("Test Application"){
+            steps {
+                sh "mvn test"
+            }
+
+        }
+        
+        stage("Sonarqube Analysis") {
+            steps {
+                script {
+                    withSonarQubeEnv(credentialsId: 'jenkins-sonarqube-token') {
+                        sh "mvn sonar:sonar"
+                    }
+                }
+            }
+
+        }
+
+        stage("Quality Gate") {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'jenkins-sonarqube-token'
+                }
+            }
+
+        }
+
+        stage("Build & Push Docker Image") {
+            steps {
+                script {
+                    docker.withRegistry('',DOCKER_PASS) {
+                        docker_image = docker.build "${IMAGE_NAME}"
+                    }
+
+                    docker.withRegistry('',DOCKER_PASS) {
+                        docker_image.push("${IMAGE_TAG}")
+                        docker_image.push('latest')
+                    }
+                }
+            }
+
+        }
+
+        stage("Trivy Scan") {
+            steps {
+                script {
+		   sh ('docker run -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image dmancloud/complete-prodcution-e2e-pipeline:1.0.0-22 --no-progress --scanners vuln  --exit-code 0 --severity HIGH,CRITICAL --format table')
+                }
+            }
+
+        }
+
+        stage ('Cleanup Artifacts') {
+            steps {
+                script {
+                    sh "docker rmi ${IMAGE_NAME}:${IMAGE_TAG}"
+                    sh "docker rmi ${IMAGE_NAME}:latest"
+                }
+            }
+        }
+
+
+        stage("Trigger CD Pipeline") {
+            steps {
+                script {
+                    sh "curl -v -k --user admin:${JENKINS_API_TOKEN} -X POST -H 'cache-control: no-cache' -H 'content-type: application/x-www-form-urlencoded' --data 'IMAGE_TAG=${IMAGE_TAG}' 'https://jenkins.dev.dman.cloud/job/gitops-complete-pipeline/buildWithParameters?token=gitops-token'"
+                }
+            }
+
+        }
+
+    }
+
+    post {
+        failure {
+            emailext body: '''${SCRIPT, template="groovy-html.template"}''', 
+                    subject: "${env.JOB_NAME} - Build # ${env.BUILD_NUMBER} - Failed", 
+                    mimeType: 'text/html',to: "dmistry@yourhostdirect.com"
+            }
+         success {
+               emailext body: '''${SCRIPT, template="groovy-html.template"}''', 
+                    subject: "${env.JOB_NAME} - Build # ${env.BUILD_NUMBER} - Successful", 
+                    mimeType: 'text/html',to: "dmistry@yourhostdirect.com"
+          }      
+    }
+}
+
+# ++++++++++++++++++++++++++++++++ ++++++++++++++++++++++++++++
+pipeline {
+
+  agent {
+    kubernetes {
+      yamlFile 'kaniko-builder.yaml'
+    }
+  }
+
+  environment {
+        APP_NAME = "complete-prodcution-e2e-pipeline"
+        RELEASE = "1.0.0"
+        DOCKER_USER = "dmancloud"
+        DOCKER_PASS = 'dockerhub'
+        IMAGE_NAME = "${DOCKER_USER}" + "/" + "${APP_NAME}"
+        IMAGE_TAG = "${RELEASE}-${BUILD_NUMBER}"
+        /* JENKINS_API_TOKEN = credentials("JENKINS_API_TOKEN") */
+
+    }
+
+  stages {
+
+    stage("Cleanup Workspace") {
+      steps {
+        cleanWs()
+      }
+    }
+
+    stage("Checkout from SCM"){
+            steps {
+                git branch: 'main', credentialsId: 'github', url: 'https://github.com/dmancloud/complete-prodcution-e2e-pipeline'
+            }
+
+        }
+
+    stage('Build & Push with Kaniko') {
+      steps {
+        container(name: 'kaniko', shell: '/busybox/sh') {
+          sh '''#!/busybox/sh
+
+            /kaniko/executor --dockerfile `pwd`/Dockerfile --context `pwd` --destination=${IMAGE_NAME}:${IMAGE_TAG} --destination=${IMAGE_NAME}:latest
+          '''
+        }
+      }
+    }
+  }
+}
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+pipeline{
+    agent{
+        label "jenkins-agent"
+    }
+    tools {
+        jdk 'Java17'
+        maven 'Maven3'
+    }
+    environment {
+        APP_NAME = "complete-prodcution-e2e-pipeline"
+        RELEASE = "1.0.0"
+        DOCKER_USER = "dmancloud"
+        DOCKER_PASS = 'dockerhub'
+        IMAGE_NAME = "${DOCKER_USER}" + "/" + "${APP_NAME}"
+        IMAGE_TAG = "${RELEASE}-${BUILD_NUMBER}"
+        JENKINS_API_TOKEN = credentials("JENKINS_API_TOKEN")
+
+    }
+    stages{
+        stage("Cleanup Workspace"){
+            steps {
+                cleanWs()
+            }
+
+        }
+    
+        stage("Checkout from SCM"){
+            steps {
+                git branch: 'main', credentialsId: 'github', url: 'https://github.com/dmancloud/complete-prodcution-e2e-pipeline'
+            }
+
+        }
+
+        stage("Build Application"){
+            steps {
+                sh "mvn clean package"
+            }
+
+        }
+
+        stage("Test Application"){
+            steps {
+                sh "mvn test"
+            }
+
+        }
+        
+        stage("Sonarqube Analysis") {
+            steps {
+                script {
+                    withSonarQubeEnv(credentialsId: 'jenkins-sonarqube-token') {
+                        sh "mvn sonar:sonar"
+                    }
+                }
+            }
+
+        }
+
+        stage("Quality Gate") {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'jenkins-sonarqube-token'
+                }
+            }
+
+        }
+
+        stage("Build & Push Docker Image") {
+            steps {
+                script {
+                    docker.withRegistry('',DOCKER_PASS) {
+                        docker_image = docker.build "${IMAGE_NAME}"
+                    }
+
+                    docker.withRegistry('',DOCKER_PASS) {
+                        docker_image.push("${IMAGE_TAG}")
+                        docker_image.push('latest')
+                    }
+                }
+            }
+
+        }
+
+        stage("Trivy Scan") {
+            steps {
+                script {
+		   sh ('docker run -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image dmancloud/complete-prodcution-e2e-pipeline:1.0.0-22 --no-progress --scanners vuln  --exit-code 0 --severity HIGH,CRITICAL --format table')
+                }
+            }
+
+        }
+
+        stage ('Cleanup Artifacts') {
+            steps {
+                script {
+                    sh "docker rmi ${IMAGE_NAME}:${IMAGE_TAG}"
+                    sh "docker rmi ${IMAGE_NAME}:latest"
+                }
+            }
+        }
+
+
+        stage("Trigger CD Pipeline") {
+            steps {
+                script {
+                    sh "curl -v -k --user admin:${JENKINS_API_TOKEN} -X POST -H 'cache-control: no-cache' -H 'content-type: application/x-www-form-urlencoded' --data 'IMAGE_TAG=${IMAGE_TAG}' 'https://jenkins.dev.dman.cloud/job/gitops-complete-pipeline/buildWithParameters?token=gitops-token'"
+                }
+            }
+
+        }
+
+    }
+
+    post {
+        failure {
+            emailext body: '''${SCRIPT, template="groovy-html.template"}''', 
+                    subject: "${env.JOB_NAME} - Build # ${env.BUILD_NUMBER} - Failed", 
+                    mimeType: 'text/html',to: "dmistry@yourhostdirect.com"
+            }
+         success {
+               emailext body: '''${SCRIPT, template="groovy-html.template"}''', 
+                    subject: "${env.JOB_NAME} - Build # ${env.BUILD_NUMBER} - Successful", 
+                    mimeType: 'text/html',to: "dmistry@yourhostdirect.com"
+          }      
+    }
+}
+
+
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+kind: Pod
+spec:
+  containers:
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:debug
+    imagePullPolicy: Always
+    command:
+    - sleep
+    args:
+    - 9999999
+    volumeMounts:
+      - name: jenkins-docker-cfg
+        mountPath: /kaniko/.docker
+  volumes:
+  - name: jenkins-docker-cfg
+    projected:
+      sources:
+      - secret:
+          name: docker-credentials
+          items:
+            - key: .dockerconfigjson
+              path: config.json
+
+
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+@Library('my-shared-library') _
+
+pipeline{
+
+    agent any
+
+    parameters{
+
+        choice(name: 'action', choices: 'create\ndelete', description: 'Choose create/Destroy')
+        string(name: 'ImageName', description: "name of the docker build", defaultValue: 'javapp')
+        string(name: 'ImageTag', description: "tag of the docker build", defaultValue: 'v1')
+        string(name: 'DockerHubUser', description: "name of the Application", defaultValue: 'vikashashoke')
+    }
+
+    stages{
+         
+        stage('Git Checkout'){
+                    when { expression {  params.action == 'create' } }
+            steps{
+            gitCheckout(
+                branch: "main",
+                url: "https://github.com/vikash-kumar01/mrdevops_java_app.git"
+            )
+            }
+        }
+         stage('Unit Test maven'){
+         
+         when { expression {  params.action == 'create' } }
+
+            steps{
+               script{
+                   
+                   mvnTest()
+               }
+            }
+        }
+         stage('Integration Test maven'){
+         when { expression {  params.action == 'create' } }
+            steps{
+               script{
+                   
+                   mvnIntegrationTest()
+               }
+            }
+        }
+        stage('Static code analysis: Sonarqube'){
+         when { expression {  params.action == 'create' } }
+            steps{
+               script{
+                   
+                   def SonarQubecredentialsId = 'sonarqube-api'
+                   statiCodeAnalysis(SonarQubecredentialsId)
+               }
+            }
+        }
+        stage('Quality Gate Status Check : Sonarqube'){
+         when { expression {  params.action == 'create' } }
+            steps{
+               script{
+                   
+                   def SonarQubecredentialsId = 'sonarqube-api'
+                   QualityGateStatus(SonarQubecredentialsId)
+               }
+            }
+        }
+        stage('Maven Build : maven'){
+         when { expression {  params.action == 'create' } }
+            steps{
+               script{
+                   
+                   mvnBuild()
+               }
+            }
+        }
+        stage('Docker Image Build'){
+         when { expression {  params.action == 'create' } }
+            steps{
+               script{
+                   
+                   dockerBuild("${params.ImageName}","${params.ImageTag}","${params.DockerHubUser}")
+               }
+            }
+        }
+         stage('Docker Image Scan: trivy '){
+         when { expression {  params.action == 'create' } }
+            steps{
+               script{
+                   
+                   dockerImageScan("${params.ImageName}","${params.ImageTag}","${params.DockerHubUser}")
+               }
+            }
+        }
+        stage('Docker Image Push : DockerHub '){
+         when { expression {  params.action == 'create' } }
+            steps{
+               script{
+                   
+                   dockerImagePush("${params.ImageName}","${params.ImageTag}","${params.DockerHubUser}")
+               }
+            }
+        }   
+        stage('Docker Image Cleanup : DockerHub '){
+         when { expression {  params.action == 'create' } }
+            steps{
+               script{
+                   
+                   dockerImageCleanup("${params.ImageName}","${params.ImageTag}","${params.DockerHubUser}")
+               }
+            }
+        }      
+    }
+}
+
+
+
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+    @Library('my-shared-library') _
+
+    pipeline{
+
+        agent any
+
+        parameters{
+
+            choice(name: 'action', choices: 'create\ndelete', description: 'Choose create/Destroy')
+            string(name: 'aws_account_id', description: " AWS Account ID", defaultValue: '496157679619')
+            string(name: 'Region', description: "Region of ECR", defaultValue: 'us-east-1')
+            string(name: 'ECR_REPO_NAME', description: "name of the ECR", defaultValue: 'vikashashoke')
+            string(name: 'cluster', description: "name of the EKS Cluster", defaultValue: 'demo-cluster1')
+        }
+        environment{
+
+            ACCESS_KEY = credentials('AWS_ACCESS_KEY_ID')
+            SECRET_KEY = credentials('AWS_SECRET_KEY_ID')
+        }
+
+        stages{
+            
+            stage('Git Checkout'){
+                        when { expression {  params.action == 'create' } }
+                steps{
+                gitCheckout(
+                    branch: "main",
+                    url: "https://github.com/vikash-kumar01/mrdevops_java_app.git"
+                )
+                }
+            }
+        //      stage('Unit Test maven'){
+            
+        //      when { expression {  params.action == 'create' } }
+
+        //         steps{
+        //            script{
+                    
+        //                mvnTest()
+        //            }
+        //         }
+        //     }
+        //      stage('Integration Test maven'){
+        //      when { expression {  params.action == 'create' } }
+        //         steps{
+        //            script{
+                    
+        //                mvnIntegrationTest()
+        //            }
+        //         }
+        //     }
+        //     stage('Static code analysis: Sonarqube'){
+        //      when { expression {  params.action == 'create' } }
+        //         steps{
+        //            script{
+                    
+        //                def SonarQubecredentialsId = 'sonarqube-api'
+        //                statiCodeAnalysis(SonarQubecredentialsId)
+        //            }
+        //         }
+        //     }
+        //     stage('Quality Gate Status Check : Sonarqube'){
+        //      when { expression {  params.action == 'create' } }
+        //         steps{
+        //            script{
+                    
+        //                def SonarQubecredentialsId = 'sonarqube-api'
+        //                QualityGateStatus(SonarQubecredentialsId)
+        //            }
+        //         }
+        //     }
+        //     stage('Maven Build : maven'){
+        //      when { expression {  params.action == 'create' } }
+        //         steps{
+        //            script{
+                    
+        //                mvnBuild()
+        //            }
+        //         }
+        //     }
+        //     stage('Docker Image Build : ECR'){
+        //      when { expression {  params.action == 'create' } }
+        //         steps{
+        //            script{
+                    
+        //                dockerBuild("${params.aws_account_id}","${params.Region}","${params.ECR_REPO_NAME}")
+        //            }
+        //         }
+        //     }
+        // stage('Docker Image Scan: trivy '){
+        //      when { expression {  params.action == 'create' } }
+        //         steps{
+        //            script{
+                    
+        //                dockerImageScan("${params.aws_account_id}","${params.Region}","${params.ECR_REPO_NAME}")
+        //            }
+        //         }
+        //     }
+        //     stage('Docker Image Push : ECR '){
+        //      when { expression {  params.action == 'create' } }
+        //         steps{
+        //            script{
+                    
+        //                dockerImagePush("${params.aws_account_id}","${params.Region}","${params.ECR_REPO_NAME}")
+        //            }
+        //         }
+        //     }   
+        //     stage('Docker Image Cleanup : ECR '){
+        //      when { expression {  params.action == 'create' } }
+        //         steps{
+        //            script{
+                    
+        //                dockerImageCleanup("${params.aws_account_id}","${params.Region}","${params.ECR_REPO_NAME}")
+        //            }
+        //         }
+        //     } 
+            stage('Create EKS Cluster : Terraform'){
+                when { expression {  params.action == 'create' } }
+                steps{
+                    script{
+
+                        dir('eks_module') {
+                        sh """
+                            
+                            terraform init 
+                            terraform plan -var 'access_key=$ACCESS_KEY' -var 'secret_key=$SECRET_KEY' -var 'region=${params.Region}' --var-file=./config/terraform.tfvars
+                            terraform apply -var 'access_key=$ACCESS_KEY' -var 'secret_key=$SECRET_KEY' -var 'region=${params.Region}' --var-file=./config/terraform.tfvars --auto-approve
+                        """
+                    }
+                    }
+                }
+            }
+            stage('Connect to EKS '){
+                when { expression {  params.action == 'create' } }
+            steps{
+
+                script{
+
+                    sh """
+                    aws configure set aws_access_key_id "$ACCESS_KEY"
+                    aws configure set aws_secret_access_key "$SECRET_KEY"
+                    aws configure set region "${params.Region}"
+                    aws eks --region ${params.Region} update-kubeconfig --name ${params.cluster}
+                    """
+                }
+            }
+            } 
+            stage('Deployment on EKS Cluster'){
+                when { expression {  params.action == 'create' } }
+                steps{
+                    script{
+                    
+                    def apply = false
+
+                    try{
+                        input message: 'please confirm to deploy on eks', ok: 'Ready to apply the config ?'
+                        apply = true
+                    }catch(err){
+                        apply= false
+                        currentBuild.result  = 'UNSTABLE'
+                    }
+                    if(apply){
+
+                        sh """
+                        kubectl apply -f .
+                        """
+                    }
+                    }
+                }
+            }    
+        }
+    }
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+    
