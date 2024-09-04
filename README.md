@@ -1,1 +1,0 @@
-# 1-ashok-interview-notes
